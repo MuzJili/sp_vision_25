@@ -45,9 +45,9 @@ constexpr double USB_LEFT_YAW_OFFSET = 2.7;
 constexpr double USB_RIGHT_YAW_OFFSET = -2.7;
 constexpr double USB_LEFT_TARGET_YAW_TRIM = -0.44;
 constexpr double USB_RIGHT_TARGET_YAW_TRIM = 0.2;
-constexpr double USB_TARGET_PITCH_TRIM = 0.3;
-constexpr char USB_LEFT_DEVICE[] = "video2";
-constexpr char USB_RIGHT_DEVICE[] = "video0";
+constexpr double USB_TARGET_PITCH_TRIM = -5.0 / 57.3;
+constexpr char USB_LEFT_DEVICE[] = "video0";
+constexpr char USB_RIGHT_DEVICE[] = "video2";
 constexpr float BIG_BUFF_R_DISTANCE_KEEP_RATIO = 0.8F;
 constexpr float BIG_BUFF_TRACK_MATCH_DISTANCE = 80.0F;
 constexpr int BIG_BUFF_MAX_TRACKS = 2;
@@ -502,8 +502,10 @@ int main(int argc, char * argv[])
   std::unique_ptr<io::USBCamera> usb_left_camera;
   std::unique_ptr<io::USBCamera> usb_right_camera;
   if (use_usb) {
-    usb_left_camera = std::make_unique<io::USBCamera>(USB_LEFT_DEVICE, config_path);
-    usb_right_camera = std::make_unique<io::USBCamera>(USB_RIGHT_DEVICE, config_path);
+    usb_left_camera =
+      std::make_unique<io::USBCamera>(USB_LEFT_DEVICE, config_path, "usb_left");
+    usb_right_camera =
+      std::make_unique<io::USBCamera>(USB_RIGHT_DEVICE, config_path, "usb_right");
     // Match `usbcamera_test` startup more closely: let the USB cameras settle before starting HikRobot.
     std::this_thread::sleep_for(USB_STARTUP_SETTLE);
   } else {
