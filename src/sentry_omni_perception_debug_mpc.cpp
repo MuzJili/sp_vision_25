@@ -536,6 +536,7 @@ int main(int argc, char * argv[])
 
   std::atomic<bool> quit = false;
   std::atomic<bool> main_camera_has_target = false;
+  std::atomic<bool> usb_settle_finished = false;
   std::mutex usb_result_mutex;
   UsbThreadResult usb_result;
 
@@ -586,12 +587,12 @@ int main(int argc, char * argv[])
           settle_pitch_error < USB_SETTLE_PITCH_THRESH) ||
          settle_timeout);
 
-      bool settle_stop_sent = false;
+      bool settle_finished = false;
       if (settle_reached) {
         if (stopped_settle_sequence != target_command.sequence) {
-          gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
           stopped_settle_sequence = target_command.sequence;
-          settle_stop_sent = true;
+          usb_settle_finished.store(true);
+          settle_finished = true;
         }
         plan.control = false;
       } else if (target_command.kind != CommandKind::settle_aim) {
@@ -637,7 +638,7 @@ int main(int argc, char * argv[])
       data["settle_yaw_error"] = settle_yaw_error;
       data["settle_pitch_error"] = settle_pitch_error;
       data["settle_timeout"] = settle_timeout ? 1 : 0;
-      data["settle_stop_sent"] = settle_stop_sent ? 1 : 0;
+      data["settle_finished"] = settle_finished ? 1 : 0;
       data["idle_stop_sent"] = idle_stop_sent ? 1 : 0;
 
       data["target_yaw"] = plan.target_yaw;
@@ -785,6 +786,7 @@ int main(int argc, char * argv[])
     if (mode == io::GimbalMode::BIG_BUFF) {
       target_queue.push(TargetCommand{});
       main_camera_has_target = false;
+      usb_settle_finished = false;
       lost_command_sequence = std::nullopt;
 
       big_buff_solver.set_R_gimbal2world(q);
@@ -830,10 +832,22 @@ int main(int argc, char * argv[])
         }
         last_usb_command = std::nullopt;
         lost_command_sequence = std::nullopt;
+        usb_settle_finished = false;
       } else if (current_usb_result.ready) {
-        target_command = current_usb_result.target_command;
-        if (target_command.kind == CommandKind::none && current_usb_result.candidate.has_value()) {
-          target_command = make_usb_fixed_command(current_usb_result.candidate.value(), gs);
+        if (omni_state == OmniState::lost_from_usb_settle && usb_settle_finished.load()) {
+          omni_state = OmniState::lost;
+          last_usb_command = std::nullopt;
+          if (!lost_command_sequence.has_value()) {
+            lost_command_sequence = command_sequence++;
+          }
+          target_command.omni_state = omni_state;
+          target_command.sequence = lost_command_sequence.value();
+          usb_settle_finished = false;
+        } else {
+          target_command = current_usb_result.target_command;
+          if (target_command.kind == CommandKind::none && current_usb_result.candidate.has_value()) {
+            target_command = make_usb_fixed_command(current_usb_result.candidate.value(), gs);
+          }
         }
 
         if (target_command.kind != CommandKind::none) {
