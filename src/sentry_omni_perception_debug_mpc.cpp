@@ -54,6 +54,7 @@ constexpr int BIG_BUFF_MAX_TRACKS = 2;
 constexpr int BIG_BUFF_MAX_LOST_FRAMES = 7;
 constexpr double USB_SETTLE_YAW_THRESH = CV_PI / 180.0;
 constexpr double USB_SETTLE_PITCH_THRESH = CV_PI / 180.0;
+constexpr auto USB_SETTLE_TIMEOUT = std::chrono::milliseconds(1500);
 
 enum class TargetSource
 {
@@ -234,13 +235,15 @@ void apply_usb_offset(auto_aim::Plan & plan, const io::GimbalState & gs, TargetS
   plan.pitch += USB_TARGET_PITCH_TRIM;
 }
 
-TargetCommand make_usb_fixed_command(const UsbCandidate & candidate)
+TargetCommand make_usb_fixed_command(const UsbCandidate & candidate, const io::GimbalState & gs)
 {
   TargetCommand command;
   command.kind = CommandKind::fixed_aim;
   command.source = candidate.source;
-  command.target_yaw = candidate.armor.ypd_in_world[0];
-  command.target_pitch = candidate.armor.ypd_in_world[1];
+  command.target_yaw = tools::limit_rad(
+    candidate.armor.ypd_in_world[0] + gs.yaw_diff + usb_yaw_offset(candidate.source) +
+    usb_target_yaw_trim(candidate.source));
+  command.target_pitch = candidate.armor.ypd_in_world[1] + USB_TARGET_PITCH_TRIM;
   return command;
 }
 
@@ -538,6 +541,9 @@ int main(int argc, char * argv[])
     auto t0 = std::chrono::steady_clock::now();
     uint16_t last_bullet_count = 0;
     std::optional<uint64_t> stopped_settle_sequence = std::nullopt;
+    std::optional<uint64_t> stopped_idle_sequence = std::nullopt;
+    std::optional<uint64_t> active_settle_sequence = std::nullopt;
+    auto settle_start = std::chrono::steady_clock::now();
 
     while (!quit) {
       if (gimbal.mode() == io::GimbalMode::BIG_BUFF) {
@@ -556,15 +562,27 @@ int main(int argc, char * argv[])
         target_command.kind == CommandKind::settle_aim)
       {
         plan = make_fixed_plan(target_command.target_yaw, target_command.target_pitch);
-        apply_usb_offset(plan, gs, target_command.source);
+      }
+
+      if (target_command.kind == CommandKind::settle_aim) {
+        if (active_settle_sequence != target_command.sequence) {
+          active_settle_sequence = target_command.sequence;
+          settle_start = std::chrono::steady_clock::now();
+        }
+      } else {
+        active_settle_sequence = std::nullopt;
       }
 
       const double settle_yaw_error = std::abs(tools::limit_rad(gs.yaw - plan.target_yaw));
       const double settle_pitch_error = std::abs(gs.pitch - plan.target_pitch);
+      const bool settle_timeout =
+        target_command.kind == CommandKind::settle_aim &&
+        std::chrono::steady_clock::now() - settle_start > USB_SETTLE_TIMEOUT;
       const bool settle_reached =
         target_command.kind == CommandKind::settle_aim &&
-        settle_yaw_error < USB_SETTLE_YAW_THRESH &&
-        settle_pitch_error < USB_SETTLE_PITCH_THRESH;
+        ((settle_yaw_error < USB_SETTLE_YAW_THRESH &&
+          settle_pitch_error < USB_SETTLE_PITCH_THRESH) ||
+         settle_timeout);
 
       bool settle_stop_sent = false;
       if (settle_reached) {
@@ -579,7 +597,18 @@ int main(int argc, char * argv[])
       }
 
       const bool fire = target_command.source == TargetSource::main && plan.fire;
-      if (!settle_reached) {
+      bool idle_stop_sent = false;
+      if (target_command.kind == CommandKind::none) {
+        if (stopped_idle_sequence != target_command.sequence) {
+          gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+          stopped_idle_sequence = target_command.sequence;
+          idle_stop_sent = true;
+        }
+      } else {
+        stopped_idle_sequence = std::nullopt;
+      }
+
+      if (!settle_reached && target_command.kind != CommandKind::none) {
         gimbal.send(
           plan.control, fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
           plan.pitch_acc);
@@ -605,7 +634,9 @@ int main(int argc, char * argv[])
       data["omni_state"] = omni_state_name(target_command.omni_state);
       data["settle_yaw_error"] = settle_yaw_error;
       data["settle_pitch_error"] = settle_pitch_error;
+      data["settle_timeout"] = settle_timeout ? 1 : 0;
       data["settle_stop_sent"] = settle_stop_sent ? 1 : 0;
+      data["idle_stop_sent"] = idle_stop_sent ? 1 : 0;
 
       data["target_yaw"] = plan.target_yaw;
       data["target_pitch"] = plan.target_pitch;
@@ -703,7 +734,7 @@ int main(int argc, char * argv[])
           std::list<auto_aim::Armor> selected_armors = {next_usb_result.candidate->armor};
           std::list<auto_aim::Target> usb_targets;
           next_usb_result.target_command =
-            make_usb_fixed_command(next_usb_result.candidate.value());
+            make_usb_fixed_command(next_usb_result.candidate.value(), gimbal.state());
 
           if (next_usb_result.candidate->source == TargetSource::usb_left) {
             usb_targets = usb_left_tracker.track(selected_armors, next_usb_result.candidate->timestamp, false);
@@ -730,6 +761,7 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point t;
   OmniState omni_state = OmniState::lost;
   std::optional<TargetCommand> last_usb_command = std::nullopt;
+  std::optional<uint64_t> lost_command_sequence = std::nullopt;
   uint64_t command_sequence = 1;
 
   while (!exiter.exit()) {
@@ -751,6 +783,7 @@ int main(int argc, char * argv[])
     if (mode == io::GimbalMode::BIG_BUFF) {
       target_queue.push(TargetCommand{});
       main_camera_has_target = false;
+      lost_command_sequence = std::nullopt;
 
       big_buff_solver.set_R_gimbal2world(q);
       big_buff_candidates = filter_big_buff_candidates(big_buff_yolo.get_multicandidateboxes(img));
@@ -794,10 +827,11 @@ int main(int argc, char * argv[])
           target_command.kind = CommandKind::target;
         }
         last_usb_command = std::nullopt;
+        lost_command_sequence = std::nullopt;
       } else if (current_usb_result.ready) {
         target_command = current_usb_result.target_command;
         if (target_command.kind == CommandKind::none && current_usb_result.candidate.has_value()) {
-          target_command = make_usb_fixed_command(current_usb_result.candidate.value());
+          target_command = make_usb_fixed_command(current_usb_result.candidate.value(), gs);
         }
 
         if (target_command.kind != CommandKind::none) {
@@ -809,6 +843,7 @@ int main(int argc, char * argv[])
               ? command_sequence++
               : last_usb_command->sequence;
           last_usb_command = target_command;
+          lost_command_sequence = std::nullopt;
         } else if (omni_state == OmniState::usb_perception && last_usb_command.has_value()) {
           omni_state = OmniState::lost_from_usb_settle;
           target_command = last_usb_command.value();
@@ -820,14 +855,24 @@ int main(int argc, char * argv[])
           target_command = last_usb_command.value();
           target_command.omni_state = omni_state;
         } else {
+          const bool entering_lost = omni_state != OmniState::lost;
           omni_state = OmniState::lost;
           last_usb_command = std::nullopt;
           target_command.omni_state = omni_state;
+          if (entering_lost || !lost_command_sequence.has_value()) {
+            lost_command_sequence = command_sequence++;
+          }
+          target_command.sequence = lost_command_sequence.value();
         }
       } else {
+        const bool entering_lost = omni_state != OmniState::lost;
         omni_state = OmniState::lost;
         last_usb_command = std::nullopt;
         target_command.omni_state = omni_state;
+        if (entering_lost || !lost_command_sequence.has_value()) {
+          lost_command_sequence = command_sequence++;
+        }
+        target_command.sequence = lost_command_sequence.value();
       }
 
       target_queue.push(target_command);
