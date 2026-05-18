@@ -165,7 +165,7 @@ std::string armor_number(auto_aim::ArmorName name)
     case auto_aim::ArmorName::five:
       return "5";
     case auto_aim::ArmorName::outpost:
-      return "6";
+      return "8";
     case auto_aim::ArmorName::sentry:
       return "7";
     case auto_aim::ArmorName::base:
