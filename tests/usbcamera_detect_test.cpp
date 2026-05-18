@@ -12,6 +12,7 @@ using namespace std::chrono_literals;
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
   "{name n         |        video0          | 端口名称 }"
+  "{section s      |                        | YAML配置段名，例如 usb_left 或 usb_right }"
   "{@config-path   | configs/standard3.yaml    | 位置参数，yaml配置文件路径 }"
   "{d display      |                        | 显示视频流       }";
 
@@ -26,9 +27,10 @@ int main(int argc, char * argv[])
 
   auto config_path = cli.get<std::string>(0);
   auto device_name = cli.get<std::string>("name");
+  auto config_section = cli.get<std::string>("section");
   auto display = cli.has("display");
 
-  io::USBCamera usbcam(device_name, config_path);
+  io::USBCamera usbcam(device_name, config_path, config_section);
 
   auto_aim::YOLO yolo(config_path, true);
 

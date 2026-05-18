@@ -13,7 +13,9 @@ namespace io
 class USBCamera
 {
 public:
-  USBCamera(const std::string & open_name, const std::string & config_path);
+  USBCamera(
+    const std::string & open_name, const std::string & config_path,
+    const std::string & config_section = "");
   ~USBCamera();
   cv::Mat read();
   void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp);
@@ -30,6 +32,7 @@ private:
   cv::VideoCapture cap_;
   cv::Mat img_;
   std::string open_name_;
+  std::string config_section_;
   int usb_exposure_, usb_frame_rate_, sharpness_;
   int open_count_;
   double image_width_, image_height_;

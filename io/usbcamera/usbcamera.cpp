@@ -9,16 +9,35 @@ using namespace std::chrono_literals;
 
 namespace io
 {
-USBCamera::USBCamera(const std::string & open_name, const std::string & config_path)
-: open_name_(open_name), quit_(false), ok_(false), queue_(1), open_count_(0)
+namespace
+{
+double read_usb_param(
+  const YAML::Node & yaml, const std::string & section, const std::string & key)
+{
+  if (!section.empty() && yaml[section] && yaml[section][key]) {
+    return yaml[section][key].as<double>();
+  }
+  return tools::read<double>(yaml, key);
+}
+}  // namespace
+
+USBCamera::USBCamera(
+  const std::string & open_name, const std::string & config_path,
+  const std::string & config_section)
+: open_name_(open_name), config_section_(config_section), quit_(false), ok_(false), queue_(1),
+  open_count_(0)
 {
   auto yaml = tools::load(config_path);
-  image_width_ = tools::read<double>(yaml, "image_width");
-  image_height_ = tools::read<double>(yaml, "image_height");
-  usb_exposure_ = tools::read<double>(yaml, "usb_exposure");
-  usb_frame_rate_ = tools::read<double>(yaml, "usb_frame_rate");
-  usb_gamma_ = tools::read<double>(yaml, "usb_gamma");
-  usb_gain_ = tools::read<double>(yaml, "usb_gain");
+  image_width_ = read_usb_param(yaml, config_section_, "image_width");
+  image_height_ = read_usb_param(yaml, config_section_, "image_height");
+  usb_exposure_ = read_usb_param(yaml, config_section_, "usb_exposure");
+  usb_frame_rate_ = read_usb_param(yaml, config_section_, "usb_frame_rate");
+  usb_gamma_ = read_usb_param(yaml, config_section_, "usb_gamma");
+  usb_gain_ = read_usb_param(yaml, config_section_, "usb_gain");
+  tools::logger()->info(
+    "[USBCamera:{}] config section='{}' width={} height={} fps={} exposure={} gamma={} gain={}",
+    open_name_, config_section_.empty() ? "<global>" : config_section_, image_width_, image_height_,
+    usb_frame_rate_, usb_exposure_, usb_gamma_, usb_gain_);
   try_open();
 
   // 守护线程
@@ -103,25 +122,28 @@ void USBCamera::open()
     tools::logger()->warn("Failed to open USB camera");
     return;
   }
+  device_name = config_section_.empty() ? open_name_ : config_section_;
   sharpness_ = cap_.get(cv::CAP_PROP_SHARPNESS);
   cap_.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+  cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
+  cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
   cap_.set(cv::CAP_PROP_FPS, usb_frame_rate_);
   cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);
   cap_.set(cv::CAP_PROP_GAMMA, usb_gamma_);
   cap_.set(cv::CAP_PROP_GAIN, usb_gain_);
+  cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   if (sharpness_ == 2) {
     device_name = "left";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   } else if (sharpness_ == 3) {
     device_name = "right";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   }
   tools::logger()->info("{} USBCamera opened", device_name);
-  tools::logger()->info("USBCamera fps:{}", cap_.get(cv::CAP_PROP_FPS));
+  tools::logger()->info(
+    "[{} USB camera] actual width={} height={} fps={} auto_exposure={} exposure={} gamma={} gain={}",
+    device_name, cap_.get(cv::CAP_PROP_FRAME_WIDTH), cap_.get(cv::CAP_PROP_FRAME_HEIGHT),
+    cap_.get(cv::CAP_PROP_FPS), cap_.get(cv::CAP_PROP_AUTO_EXPOSURE),
+    cap_.get(cv::CAP_PROP_EXPOSURE), cap_.get(cv::CAP_PROP_GAMMA),
+    cap_.get(cv::CAP_PROP_GAIN));
   // 取图线程
   capture_thread_ = std::thread{[this] {
     ok_ = true;
