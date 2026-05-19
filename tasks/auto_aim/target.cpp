@@ -268,6 +268,14 @@ bool Target::convergened()
   return is_converged_;
 }
 
+bool Target::allow_fire() const
+{
+  if (!is_outpost_target()) return true;
+
+  const bool is_static_outpost = std::abs(ekf_.x[7]) < OUTPOST_STATIC_FIRE_MAX_SPEED;
+  return is_static_outpost || use_outpost_staggered_height_model();
+}
+
 bool Target::is_outpost_target() const
 {
   return name == ArmorName::outpost && armor_num_ == OUTPOST_ARMOR_COUNT;

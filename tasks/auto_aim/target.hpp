@@ -41,6 +41,7 @@ public:
   bool diverged() const;
 
   bool convergened();
+  bool allow_fire() const;
 
   bool isinit = false;
 
@@ -49,7 +50,8 @@ public:
 private:
   static constexpr double OUTPOST_ARMOR_HEIGHT_STEP = 0.12;
   static constexpr int OUTPOST_ARMOR_COUNT = 3;
-  static constexpr int OUTPOST_HEIGHT_MIN_SAMPLES = 30;
+  static constexpr int OUTPOST_HEIGHT_MIN_SAMPLES = 1;
+  static constexpr double OUTPOST_STATIC_FIRE_MAX_SPEED = 0.2;
 
   int armor_num_;
   int switch_count_;

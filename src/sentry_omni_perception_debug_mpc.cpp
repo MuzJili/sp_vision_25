@@ -473,8 +473,10 @@ int main(int argc, char * argv[])
         data["target_z"] = target_command.target->ekf_x()[4];
         data["target_vz"] = target_command.target->ekf_x()[5];
         data["w"] = target_command.target->ekf_x()[7];
+        data["allow_fire"] = target_command.target->allow_fire() ? 1 : 0;
       } else {
         data["w"] = 0.0;
+        data["allow_fire"] = 0;
       }
 
       plotter.plot(data);
@@ -510,7 +512,7 @@ int main(int argc, char * argv[])
   if (use_usb) {
     usb_thread = std::thread([&]() {
       while (!quit) {
-        const auto mode =  io::GimbalMode::AUTO_AIM;
+        const auto mode =  io::GimbalMode::OUTPOST;
         cv::Mat usb_left_img;
         cv::Mat usb_right_img;
         std::chrono::steady_clock::time_point usb_left_t;
@@ -587,7 +589,7 @@ int main(int argc, char * argv[])
     auto q = gimbal.q(t - GIMBAL_DELAY);
     auto gs = gimbal.state();
     auto mode = gimbal.mode();
-    mode =  io::GimbalMode::AUTO_AIM;
+    mode =  io::GimbalMode::OUTPOST;
     auto q_ypr = tools::eulers(q, 2, 1, 0);
 
     std::list<auto_aim::Armor> main_armors;
