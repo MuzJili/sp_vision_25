@@ -23,7 +23,7 @@ Target::Target(
   is_converged_(false),
   outpost_height_ready_(false),
   outpost_observed_mask_(0),
-  outpost_height_sums_{0.0, 0.0, 0.0},
+  outpost_height_avgs_{0.0, 0.0, 0.0},
   outpost_height_counts_{0, 0, 0},
   outpost_height_order_{0, 0, 0},
   outpost_center_z_(0.0),
@@ -64,7 +64,7 @@ Target::Target(double x, double vyaw, double radius, double h)
   is_converged_(false),
   outpost_height_ready_(false),
   outpost_observed_mask_(0),
-  outpost_height_sums_{0.0, 0.0, 0.0},
+  outpost_height_avgs_{0.0, 0.0, 0.0},
   outpost_height_counts_{0, 0, 0},
   outpost_height_order_{0, 0, 0},
   outpost_center_z_(0.0)
@@ -288,20 +288,30 @@ bool Target::use_outpost_staggered_height_model() const
 
 void Target::record_outpost_observation(int id, const Armor & armor)
 {
-  if (!is_outpost_target() || id < 0 || id >= OUTPOST_ARMOR_COUNT) return;
+  if (!is_outpost_target()) return;
 
+  if (id < 0 || id >= OUTPOST_ARMOR_COUNT) return;
+
+  const double observed_z = armor.xyz_in_world[2];
   outpost_observed_mask_ |= (1 << id);
-  outpost_height_sums_[id] += armor.xyz_in_world[2];
+  if (outpost_height_counts_[id] == 0) {
+    outpost_height_avgs_[id] = observed_z;
+  } else {
+    outpost_height_avgs_[id] =
+      (1.0 - OUTPOST_HEIGHT_EMA_ALPHA) * outpost_height_avgs_[id] +
+      OUTPOST_HEIGHT_EMA_ALPHA * observed_z;
+  }
   outpost_height_counts_[id] += 1;
 
-  if (outpost_height_ready_ || outpost_observed_mask_ != ((1 << OUTPOST_ARMOR_COUNT) - 1)) {
-    return;
-  }
+  if (outpost_height_ready_) return;
+
+  const int full_observed_mask = (1 << OUTPOST_ARMOR_COUNT) - 1;
+  if (outpost_observed_mask_ != full_observed_mask) return;
 
   std::array<std::pair<double, int>, OUTPOST_ARMOR_COUNT> avg_height_and_id{};
   for (int i = 0; i < OUTPOST_ARMOR_COUNT; ++i) {
     if (outpost_height_counts_[i] < OUTPOST_HEIGHT_MIN_SAMPLES) return;
-    const double avg_z = outpost_height_sums_[i] / std::max(1, outpost_height_counts_[i]);
+    const double avg_z = outpost_height_avgs_[i];
     avg_height_and_id[i] = {avg_z, i};
   }
   std::sort(
@@ -310,9 +320,9 @@ void Target::record_outpost_observation(int id, const Armor & armor)
 
   const double low_to_mid = avg_height_and_id[1].first - avg_height_and_id[0].first;
   const double mid_to_high = avg_height_and_id[2].first - avg_height_and_id[1].first;
-  constexpr double MIN_HEIGHT_STEP = 0.06;
+  constexpr double MIN_HEIGHT_STEP = 0.05;
   constexpr double MAX_HEIGHT_STEP = 0.20;
-  constexpr double MAX_STEP_DIFF = 0.08;
+  constexpr double MAX_STEP_DIFF = 0.10;
   if (
     low_to_mid < MIN_HEIGHT_STEP || low_to_mid > MAX_HEIGHT_STEP ||
     mid_to_high < MIN_HEIGHT_STEP || mid_to_high > MAX_HEIGHT_STEP ||

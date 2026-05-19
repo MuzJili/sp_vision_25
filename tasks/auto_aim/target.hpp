@@ -50,7 +50,8 @@ public:
 private:
   static constexpr double OUTPOST_ARMOR_HEIGHT_STEP = 0.12;
   static constexpr int OUTPOST_ARMOR_COUNT = 3;
-  static constexpr int OUTPOST_HEIGHT_MIN_SAMPLES = 1;
+  static constexpr int OUTPOST_HEIGHT_MIN_SAMPLES = 2;
+  static constexpr double OUTPOST_HEIGHT_EMA_ALPHA = 0.2;
   static constexpr double OUTPOST_STATIC_FIRE_MAX_SPEED = 0.2;
 
   int armor_num_;
@@ -60,7 +61,7 @@ private:
   bool is_switch_, is_converged_;
   bool outpost_height_ready_;
   int outpost_observed_mask_;
-  std::array<double, OUTPOST_ARMOR_COUNT> outpost_height_sums_;
+  std::array<double, OUTPOST_ARMOR_COUNT> outpost_height_avgs_;
   std::array<int, OUTPOST_ARMOR_COUNT> outpost_height_counts_;
   std::array<int, OUTPOST_ARMOR_COUNT> outpost_height_order_;
   double outpost_center_z_;
