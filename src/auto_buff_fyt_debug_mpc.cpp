@@ -1,6 +1,8 @@
 #include <fmt/format.h>
 
+#include <nlohmann/json.hpp>
 #include <numeric>
+#include <opencv2/opencv.hpp>
 #include <string>
 #include <vector>
 
@@ -75,8 +77,7 @@ int main(int argc, char * argv[])
 
   auto_buff_fyt::Buff_Detector detector(config_path);
   auto_buff_fyt::Solver solver(config_path);
-  // auto_buff_fyt::SmallTarget target;
-  auto_buff_fyt::BigTarget target;
+  auto_buff_fyt::BigBuffTracker tracker;
   auto_buff_fyt::Aimer aimer(config_path);
 
   cv::Mat img;
@@ -91,15 +92,19 @@ int main(int argc, char * argv[])
 
     solver.set_R_gimbal2world(q);
 
-    auto power_runes = detector.detect(img);
+    const auto candidates = detector.detect_candidates(img);
     const auto & filtered_objects = detector.last_filtered_objects();
     const auto & binary_roi = detector.last_binary_roi();
+    tracker.update(candidates);
 
-    solver.solve(power_runes);
+    auto * locked_track = tracker.locked_track();
+    if (locked_track != nullptr && locked_track->power_rune.has_value()) {
+      solver.solve(locked_track->power_rune);
+      locked_track->target.get_target(locked_track->power_rune, t);
+    }
 
-    target.get_target(power_runes, t);
-
-    auto target_copy = target;
+    auto_buff_fyt::BigTarget target_copy;
+    if (locked_track != nullptr) target_copy = locked_track->target;
 
     auto plan = aimer.mpc_aim(target_copy, t, gs, true);
 
@@ -109,8 +114,8 @@ int main(int argc, char * argv[])
 
     nlohmann::json data;
 
-    if (power_runes.has_value()) {
-      const auto & p = power_runes.value();
+    if (locked_track != nullptr && locked_track->power_rune.has_value()) {
+      const auto & p = locked_track->power_rune.value();
       data["buff_R_yaw"] = p.ypd_in_world[0];
       data["buff_R_pitch"] = p.ypd_in_world[1];
       data["buff_R_dis"] = p.ypd_in_world[2];
@@ -118,34 +123,38 @@ int main(int argc, char * argv[])
       data["buff_pitch"] = p.ypr_in_world[1] * 57.3;
       data["buff_roll"] = p.ypr_in_world[2] * 57.3;
     }
+    data["big_buff_candidate_num"] = candidates.size();
+    data["big_buff_track_num"] = tracker.track_count();
+    data["big_buff_locked_id"] = tracker.locked_track_id().value_or(-1);
 
     for (const auto & obj : filtered_objects) {
       const bool is_selected_candidate =
-        std::find_if(
-          filtered_objects.begin(), filtered_objects.end(), [&](const auto & filtered) {
-            return filtered.type == obj.type && filtered.color == obj.color &&
-                   std::abs(filtered.prob - obj.prob) < 1e-3 &&
-                   cv::norm(filtered.pts.bottom_left - obj.pts.bottom_left) < 1.0;
-          }) != filtered_objects.end();
+        locked_track != nullptr && locked_track->power_rune.has_value() &&
+        obj.type == auto_buff_fyt::RuneType::INACTIVATED &&
+        cv::norm(obj.pts.bottom_left - locked_track->power_rune->target().points[0]) < 1.0;
       draw_rune_object(img, obj, is_selected_candidate);
     }
 
-    if (!target.is_unsolve()) {
-      auto & p = power_runes.value();
+    if (
+      locked_track != nullptr && !locked_track->target.is_unsolve() &&
+      locked_track->power_rune.has_value())
+    {
+      auto & p = locked_track->power_rune.value();
 
       for (int i = 0; i < 4; ++i) tools::draw_point(img, p.target().points[i]);
       tools::draw_point(img, p.target().center, {0, 0, 255}, 3);
       tools::draw_point(img, p.r_center, {0, 0, 255}, 3);
 
-      auto Rxyz_in_world_now = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-      auto image_points =
-        solver.reproject_buff(Rxyz_in_world_now, target.ekf_x()[4], target.ekf_x()[5]);
+      auto Rxyz_in_world_now =
+        locked_track->target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
+      auto image_points = solver.reproject_buff(
+        Rxyz_in_world_now, locked_track->target.ekf_x()[4], locked_track->target.ekf_x()[5]);
       tools::draw_points(
         img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {0, 255, 0});
       tools::draw_points(
         img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {0, 255, 0});
 
-      auto Rxyz_in_world_pre = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
+      auto Rxyz_in_world_pre = locked_track->target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
       image_points =
         solver.reproject_buff(Rxyz_in_world_pre, target_copy.ekf_x()[4], target_copy.ekf_x()[5]);
       tools::draw_points(
@@ -153,7 +162,7 @@ int main(int argc, char * argv[])
       tools::draw_points(
         img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {255, 0, 0});
 
-      Eigen::VectorXd x = target.ekf_x();
+      Eigen::VectorXd x = locked_track->target.ekf_x();
       data["R_yaw"] = x[0];
       data["R_V_yaw"] = x[1];
       data["R_pitch"] = x[2];
@@ -166,8 +175,19 @@ int main(int argc, char * argv[])
         data["a"] = x[7];
         data["w"] = x[8];
         data["fi"] = x[9];
-        data["spd0"] = target.spd;
+        data["spd0"] = locked_track->target.spd;
       }
+    }
+
+    for (const auto & track : tracker.tracks()) {
+      const auto color = tracker.locked_track_id().has_value() &&
+                               track.id == tracker.locked_track_id().value()
+                           ? cv::Scalar{0, 0, 255}
+                           : cv::Scalar{0, 255, 0};
+      cv::circle(img, track.center, 5, color, -1, cv::LINE_AA);
+      tools::draw_text(
+        img, fmt::format("buff#{} {:.2f}", track.id, track.confidence),
+        track.center + cv::Point2f{6.0F, -6.0F}, color);
     }
 
     if (!binary_roi.empty() && binary_roi.cols > 1 && binary_roi.rows > 1) {

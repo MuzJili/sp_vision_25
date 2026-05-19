@@ -72,7 +72,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   auto_buff_fyt::Buff_Detector detector(config_path);
   auto_buff_fyt::Solver solver(config_path);
-  auto_buff_fyt::BigTarget target;
+  auto_buff_fyt::BigBuffTracker tracker;
   auto_buff_fyt::Aimer aimer(config_path);
 
   cv::VideoCapture video(video_path);
@@ -116,22 +116,25 @@ int main(int argc, char * argv[])
       solver.set_R_gimbal2world({w, x, y, z});
     }
 
-    auto selected = detector.detect(img);
+    const auto candidates = detector.detect_candidates(img);
     const auto & filtered_objects = detector.last_filtered_objects();
     const auto & binary_roi = detector.last_binary_roi();
+    tracker.update(candidates);
+    auto * locked_track = tracker.locked_track();
 
     if (!filtered_objects.empty()) ++model_detected_frames;
-    if (selected.has_value()) ++selected_target_frames;
+    if (locked_track != nullptr && locked_track->power_rune.has_value()) ++selected_target_frames;
 
     for (const auto & obj : filtered_objects) {
       const bool is_selected_candidate =
-        selected.has_value() && obj.type == auto_buff_fyt::RuneType::INACTIVATED &&
-        cv::norm(obj.pts.bottom_left - selected->target().points[0]) < 1.0;
+        locked_track != nullptr && locked_track->power_rune.has_value() &&
+        obj.type == auto_buff_fyt::RuneType::INACTIVATED &&
+        cv::norm(obj.pts.bottom_left - locked_track->power_rune->target().points[0]) < 1.0;
       draw_rune_object(img, obj, is_selected_candidate);
     }
 
-    if (selected.has_value()) {
-      auto & rune = selected.value();
+    if (locked_track != nullptr && locked_track->power_rune.has_value()) {
+      auto & rune = locked_track->power_rune.value();
       auto & fanblade = rune.target();
       for (int i = 0; i < 4; ++i) tools::draw_point(img, fanblade.points[i], {0, 255, 0}, 3);
       tools::draw_point(img, fanblade.center, {0, 0, 255}, 4);
@@ -139,15 +142,20 @@ int main(int argc, char * argv[])
     }
 
     if (has_pose) {
-      solver.solve(selected);
-      target.get_target(selected, timestamp);
-      auto target_copy = target;
+      if (locked_track != nullptr && locked_track->power_rune.has_value()) {
+        solver.solve(locked_track->power_rune);
+        locked_track->target.get_target(locked_track->power_rune, timestamp);
+      }
+
+      auto_buff_fyt::BigTarget target_copy;
+      if (locked_track != nullptr) target_copy = locked_track->target;
       auto command = aimer.aim(target_copy, timestamp, 22, false);
-      if (!target.is_unsolve()) {
+      if (locked_track != nullptr && !locked_track->target.is_unsolve()) {
         ++solved_frames;
-        const auto buff_center = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-        auto image_points =
-          solver.reproject_buff(buff_center, target.ekf_x()[4], target.ekf_x()[5]);
+        const auto buff_center =
+          locked_track->target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
+        auto image_points = solver.reproject_buff(
+          buff_center, locked_track->target.ekf_x()[4], locked_track->target.ekf_x()[5]);
         if (image_points.size() >= 4) {
           tools::draw_points(
             img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4),
@@ -175,8 +183,9 @@ int main(int argc, char * argv[])
     cv::putText(
       img,
       fmt::format(
-        "frame:{} model:{}/{} target:{} solved:{}", frame_count, model_detected_frames,
-        total_frames, selected_target_frames, solved_frames),
+        "frame:{} model:{}/{} target:{} solved:{} candidates:{} tracks:{} locked:{}", frame_count,
+        model_detected_frames, total_frames, selected_target_frames, solved_frames,
+        candidates.size(), tracker.track_count(), tracker.locked_track_id().value_or(-1)),
       {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
 
     if (display) {
