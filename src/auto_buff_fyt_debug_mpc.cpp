@@ -86,7 +86,7 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, t);
-    q = gimbal.q(t);
+    q = gimbal.q(t-std::chrono::milliseconds(7));
     auto gs = gimbal.state();
     // recorder.record(img, q, t);
 
