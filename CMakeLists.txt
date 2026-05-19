@@ -180,8 +180,8 @@ if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND rosidl_typesupport_
     add_executable(sentry_omni_perception_debug_mpc src/sentry_omni_perception_debug_mpc.cpp)
     target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
     target_link_libraries(standard_fyt_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff auto_buff_fyt tools io)
-    target_link_libraries(standard_sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
-    target_link_libraries(sentry_omni_perception_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
+    target_link_libraries(standard_sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff_fyt auto_buff tools io)
+    target_link_libraries(sentry_omni_perception_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
     # 编译 sentry 和 publish_test
     add_executable(sentry src/sentry.cpp)

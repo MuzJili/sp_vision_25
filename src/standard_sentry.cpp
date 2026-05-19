@@ -19,11 +19,11 @@
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
-#include "tasks/auto_buff/buff_aimer.hpp"
-#include "tasks/auto_buff/buff_solver.hpp"
-#include "tasks/auto_buff/buff_target.hpp"
-#include "tasks/auto_buff/buff_type.hpp"
-#include "tasks/auto_buff/yolo11_buff.hpp"
+#include "tasks/auto_buff_fyt/buff_aimer.hpp"
+#include "tasks/auto_buff_fyt/buff_detector.hpp"
+#include "tasks/auto_buff_fyt/buff_solver.hpp"
+#include "tasks/auto_buff_fyt/buff_target.hpp"
+#include "tasks/auto_buff_fyt/buff_type.hpp"
 #include "tools/exiter.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
@@ -43,10 +43,6 @@ constexpr double USB_RIGHT_TARGET_YAW_TRIM = 0.2;
 constexpr double USB_TARGET_PITCH_TRIM = -5.0 / 57.3;
 constexpr char USB_LEFT_DEVICE[] = "video0";
 constexpr char USB_RIGHT_DEVICE[] = "video2";
-constexpr float BIG_BUFF_R_DISTANCE_KEEP_RATIO = 0.8F;
-constexpr float BIG_BUFF_TRACK_MATCH_DISTANCE = 80.0F;
-constexpr int BIG_BUFF_MAX_TRACKS = 2;
-constexpr int BIG_BUFF_MAX_LOST_FRAMES = 7;
 constexpr double USB_SETTLE_YAW_THRESH = CV_PI / 180.0;
 constexpr double USB_SETTLE_PITCH_THRESH = CV_PI / 180.0;
 constexpr auto USB_SETTLE_TIMEOUT = std::chrono::milliseconds(1500);
@@ -99,24 +95,6 @@ struct UsbThreadResult
   std::optional<UsbCandidate> candidate = std::nullopt;
   TargetCommand target_command;
   bool ready = false;
-};
-
-struct BigBuffCandidate
-{
-  auto_buff::YOLO11_BUFF::Object object;
-  auto_buff::PowerRune power_rune;
-  cv::Point2f center;
-  float r_distance = 0.0F;
-};
-
-struct BigBuffTrack
-{
-  int id = 0;
-  auto_buff::BigTarget target;
-  std::optional<auto_buff::PowerRune> power_rune = std::nullopt;
-  cv::Point2f center;
-  float confidence = 0.0F;
-  int lost_count = 0;
 };
 
 double usb_yaw_offset(TargetSource source)
@@ -208,154 +186,6 @@ TargetCommand make_usb_fixed_command(const UsbCandidate & candidate, const io::G
     usb_target_yaw_trim(candidate.source));
   command.target_pitch = candidate.armor.ypd_in_world[1] + USB_TARGET_PITCH_TRIM;
   return command;
-}
-
-cv::Point2f four_point_center(const std::vector<cv::Point2f> & points)
-{
-  cv::Point2f center{0.0F, 0.0F};
-  for (int i = 0; i < 4; ++i) center += points[i];
-  return center / 4.0F;
-}
-
-std::optional<BigBuffCandidate> make_big_buff_candidate(
-  const auto_buff::YOLO11_BUFF::Object & object)
-{
-  if (object.kpt.size() < 6) return std::nullopt;
-
-  std::vector<cv::Point2f> blade_points(object.kpt.begin(), object.kpt.begin() + 4);
-  auto filter_center = four_point_center(object.kpt);
-  std::vector<auto_buff::FanBlade> fanblades;
-  fanblades.emplace_back(blade_points, object.kpt[4], auto_buff::_light);
-  auto_buff::PowerRune power_rune(fanblades, object.kpt[5], std::nullopt);
-  if (power_rune.is_unsolve()) return std::nullopt;
-
-  BigBuffCandidate candidate;
-  candidate.object = object;
-  candidate.power_rune = power_rune;
-  candidate.center = object.kpt[4];
-  candidate.r_distance = cv::norm(object.kpt[5] - filter_center);
-  return candidate;
-}
-
-std::vector<BigBuffCandidate> filter_big_buff_candidates(
-  const std::vector<auto_buff::YOLO11_BUFF::Object> & objects)
-{
-  std::vector<BigBuffCandidate> candidates;
-  candidates.reserve(objects.size());
-
-  for (const auto & object : objects) {
-    auto candidate = make_big_buff_candidate(object);
-    if (candidate.has_value()) candidates.emplace_back(candidate.value());
-  }
-  if (candidates.empty()) return candidates;
-
-  const auto max_r_it = std::max_element(
-    candidates.begin(), candidates.end(), [](const BigBuffCandidate & a, const BigBuffCandidate & b) {
-      return a.r_distance < b.r_distance;
-    });
-  const auto min_keep_r = max_r_it->r_distance * BIG_BUFF_R_DISTANCE_KEEP_RATIO;
-
-  candidates.erase(
-    std::remove_if(
-      candidates.begin(), candidates.end(),
-      [min_keep_r](const BigBuffCandidate & candidate) {
-        return candidate.r_distance < min_keep_r;
-      }),
-    candidates.end());
-
-  std::sort(
-    candidates.begin(), candidates.end(), [](const BigBuffCandidate & a, const BigBuffCandidate & b) {
-      return a.object.prob > b.object.prob;
-    });
-
-  if (candidates.size() > BIG_BUFF_MAX_TRACKS) candidates.resize(BIG_BUFF_MAX_TRACKS);
-  return candidates;
-}
-
-void update_big_buff_tracks(
-  const std::vector<BigBuffCandidate> & candidates, std::vector<BigBuffTrack> & tracks,
-  std::optional<int> & locked_track_id, int & next_track_id)
-{
-  std::vector<bool> candidate_matched(candidates.size(), false);
-  std::vector<bool> track_matched(tracks.size(), false);
-
-  for (std::size_t candidate_i = 0; candidate_i < candidates.size(); ++candidate_i) {
-    const auto & candidate = candidates[candidate_i];
-    std::optional<std::size_t> best_track_i;
-    auto best_distance = BIG_BUFF_TRACK_MATCH_DISTANCE;
-
-    for (std::size_t track_i = 0; track_i < tracks.size(); ++track_i) {
-      if (track_matched[track_i]) continue;
-
-      const auto distance = static_cast<float>(cv::norm(candidate.center - tracks[track_i].center));
-      if (distance < best_distance) {
-        best_distance = distance;
-        best_track_i = track_i;
-      }
-    }
-
-    if (!best_track_i.has_value()) continue;
-
-    auto & track = tracks[best_track_i.value()];
-    track.power_rune = candidate.power_rune;
-    track.center = candidate.center;
-    track.confidence = candidate.object.prob;
-    track.lost_count = 0;
-    candidate_matched[candidate_i] = true;
-    track_matched[best_track_i.value()] = true;
-  }
-
-  for (std::size_t track_i = 0; track_i < tracks.size(); ++track_i) {
-    if (!track_matched[track_i]) ++tracks[track_i].lost_count;
-  }
-
-  tracks.erase(
-    std::remove_if(
-      tracks.begin(), tracks.end(),
-      [](const BigBuffTrack & track) { return track.lost_count > BIG_BUFF_MAX_LOST_FRAMES; }),
-    tracks.end());
-
-  for (std::size_t candidate_i = 0; candidate_i < candidates.size(); ++candidate_i) {
-    if (candidate_matched[candidate_i] || tracks.size() >= BIG_BUFF_MAX_TRACKS) continue;
-
-    BigBuffTrack track;
-    track.id = next_track_id++;
-    track.power_rune = candidates[candidate_i].power_rune;
-    track.center = candidates[candidate_i].center;
-    track.confidence = candidates[candidate_i].object.prob;
-    tracks.emplace_back(std::move(track));
-  }
-
-  if (
-    locked_track_id.has_value() &&
-    std::none_of(tracks.begin(), tracks.end(), [locked_track_id](const BigBuffTrack & track) {
-      return track.id == locked_track_id.value();
-    }))
-  {
-    locked_track_id = std::nullopt;
-  }
-
-  if (!locked_track_id.has_value()) {
-    auto best_track_it = std::max_element(
-      tracks.begin(), tracks.end(), [](const BigBuffTrack & a, const BigBuffTrack & b) {
-        if ((a.lost_count == 0) != (b.lost_count == 0)) return a.lost_count != 0;
-        return a.confidence < b.confidence;
-      });
-    if (best_track_it != tracks.end() && best_track_it->lost_count == 0) {
-      locked_track_id = best_track_it->id;
-    }
-  }
-}
-
-BigBuffTrack * find_big_buff_track(
-  std::vector<BigBuffTrack> & tracks, const std::optional<int> & track_id)
-{
-  if (!track_id.has_value()) return nullptr;
-
-  auto track_it = std::find_if(tracks.begin(), tracks.end(), [track_id](const BigBuffTrack & track) {
-    return track.id == track_id.value();
-  });
-  return track_it == tracks.end() ? nullptr : &(*track_it);
 }
 
 combat_rm_interfaces::msg::Target make_target_msg(const TargetCommand & target_command)
@@ -474,21 +304,20 @@ int main(int argc, char * argv[])
 
   auto_aim::YOLO yolo(config_path, false);
   auto_aim::YOLO usb_yolo(config_path, false);
-  auto_buff::YOLO11_BUFF big_buff_yolo(config_path);
+  auto_buff_fyt::Buff_Detector buff_detector(config_path);
 
   auto_aim::Solver main_solver(config_path);
   auto_aim::Solver usb_left_solver(config_path);
   auto_aim::Solver usb_right_solver(config_path);
-  auto_buff::Solver big_buff_solver(config_path);
+  auto_buff_fyt::Solver buff_solver(config_path);
 
   auto_aim::Tracker main_tracker(config_path, main_solver);
   auto_aim::Tracker usb_left_tracker(config_path, usb_left_solver);
   auto_aim::Tracker usb_right_tracker(config_path, usb_right_solver);
   auto_aim::Planner planner(config_path);
-  auto_buff::Aimer big_buff_aimer(config_path);
-  std::vector<BigBuffTrack> big_buff_tracks;
-  std::optional<int> locked_big_buff_track_id = std::nullopt;
-  int next_big_buff_track_id = 1;
+  auto_buff_fyt::Aimer buff_aimer(config_path);
+  auto_buff_fyt::SmallTarget buff_small_target;
+  auto_buff_fyt::BigBuffTracker buff_tracker;
 
   tools::ThreadSafeQueue<TargetCommand, true> target_queue(1);
   target_queue.push(TargetCommand{});
@@ -506,7 +335,10 @@ int main(int argc, char * argv[])
     auto settle_start = std::chrono::steady_clock::now();
 
     while (!quit) {
-      if (gimbal.mode() == io::GimbalMode::BIG_BUFF) {
+      if (
+        gimbal.mode() == io::GimbalMode::SMALL_BUFF ||
+        gimbal.mode() == io::GimbalMode::BIG_BUFF)
+      {
         std::this_thread::sleep_for(10ms);
         continue;
       }
@@ -676,38 +508,44 @@ int main(int argc, char * argv[])
     auto mode = gimbal.mode();
     std::list<auto_aim::Armor> main_armors;
     std::list<auto_aim::Target> main_targets;
-    std::vector<BigBuffCandidate> big_buff_candidates;
-    auto_aim::Plan big_buff_plan{false, false, 0, 0, 0, 0, 0, 0, 0, 0};
+    std::vector<auto_buff_fyt::BigBuffCandidate> buff_candidates;
+    auto_aim::Plan buff_plan{false, false, 0, 0, 0, 0, 0, 0, 0, 0};
 
     UsbThreadResult current_usb_result;
     TargetCommand target_command;
 
-    if (mode == io::GimbalMode::BIG_BUFF) {
+    if (mode == io::GimbalMode::SMALL_BUFF || mode == io::GimbalMode::BIG_BUFF) {
       target_queue.push(TargetCommand{});
       main_camera_has_target = false;
       usb_settle_finished = false;
       lost_command_sequence = std::nullopt;
 
-      big_buff_solver.set_R_gimbal2world(q);
-      big_buff_candidates = filter_big_buff_candidates(big_buff_yolo.get_multicandidateboxes(img));
-      update_big_buff_tracks(
-        big_buff_candidates, big_buff_tracks, locked_big_buff_track_id, next_big_buff_track_id);
+      buff_solver.set_R_gimbal2world(q);
+      if (mode == io::GimbalMode::SMALL_BUFF) {
+        buff_tracker.reset();
+        auto power_rune = buff_detector.detect(img);
+        buff_solver.solve(power_rune);
+        buff_small_target.get_target(power_rune, t);
+        auto target_copy = buff_small_target;
+        buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
+      } else {
+        buff_candidates = buff_detector.detect_candidates(img);
+        buff_tracker.update(buff_candidates);
 
-      auto * locked_track = find_big_buff_track(big_buff_tracks, locked_big_buff_track_id);
-      if (locked_track != nullptr && locked_track->power_rune.has_value()) {
-        big_buff_solver.solve(locked_track->power_rune);
-        locked_track->target.get_target(locked_track->power_rune, t);
-        auto target_copy = locked_track->target;
-        big_buff_plan = big_buff_aimer.mpc_aim(target_copy, t, gs, true);
+        auto * locked_track = buff_tracker.locked_track();
+        if (locked_track != nullptr && locked_track->power_rune.has_value()) {
+          buff_solver.solve(locked_track->power_rune);
+          locked_track->target.get_target(locked_track->power_rune, t);
+          auto target_copy = locked_track->target;
+          buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
+        }
       }
 
       gimbal.send(
-        big_buff_plan.control, big_buff_plan.fire, big_buff_plan.yaw, big_buff_plan.yaw_vel,
-        big_buff_plan.yaw_acc, big_buff_plan.pitch, big_buff_plan.pitch_vel,
-        big_buff_plan.pitch_acc);
+        buff_plan.control, buff_plan.fire, buff_plan.yaw, buff_plan.yaw_vel, buff_plan.yaw_acc,
+        buff_plan.pitch, buff_plan.pitch_vel, buff_plan.pitch_acc);
     } else {
-      big_buff_tracks.clear();
-      locked_big_buff_track_id = std::nullopt;
+      buff_tracker.reset();
 
       main_solver.set_R_gimbal2world(q);
       main_armors = filter_armors(yolo.detect(img), enemy_color, mode);
