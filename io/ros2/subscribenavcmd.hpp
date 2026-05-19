@@ -39,7 +39,7 @@ private:
 
     uint8_t latest_chassis_status_ = 0;
     uint8_t latest_sentry_status_ = 0;
-    uint8_t latest_target_mode_ = 0;
+    uint8_t latest_target_mode_ = 1;
     uint8_t latest_terrain_status_ = 0;
     uint8_t latest_bump_status_ = 0;
     geometry_msgs::msg::Twist latest_cmd_vel_;

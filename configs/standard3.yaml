@@ -8,7 +8,7 @@ yolo11_model_path: assets/yolo11.xml
 yolov8_model_path: assets/yolov8.xml
 yolov5_model_path: assets/yolov5.xml
 device: CPU
-min_confidence: 0.4
+min_confidence: 0.7
 use_traditional: false
 
 #####-----ROI-----#####
@@ -36,9 +36,9 @@ usb_left:
   image_width: 1280
   image_height: 720
   usb_frame_rate: 60
-  usb_exposure: 30
+  usb_exposure: 100
   usb_gamma: 0
-  usb_gain: 90
+  usb_gain: 80
 
 usb_right:
   image_width: 1280
@@ -85,7 +85,7 @@ judge_distance: 2 #距离判断阈值
 auto_fire: true # 是否由自瞄控制射击
 
 camera_name: "hikrobot"
-exposure_ms: 3.5
+exposure_ms: 2.5
 gain: 16.9
 vid_pid: "2bdf:0001"
 

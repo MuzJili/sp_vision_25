@@ -510,7 +510,7 @@ int main(int argc, char * argv[])
   if (use_usb) {
     usb_thread = std::thread([&]() {
       while (!quit) {
-        const auto mode =  io::GimbalMode::OUTPOST;
+        const auto mode =  io::GimbalMode::AUTO_AIM;
         cv::Mat usb_left_img;
         cv::Mat usb_right_img;
         std::chrono::steady_clock::time_point usb_left_t;
@@ -587,7 +587,7 @@ int main(int argc, char * argv[])
     auto q = gimbal.q(t - GIMBAL_DELAY);
     auto gs = gimbal.state();
     auto mode = gimbal.mode();
-    mode =  io::GimbalMode::OUTPOST;
+    mode =  io::GimbalMode::AUTO_AIM;
     auto q_ypr = tools::eulers(q, 2, 1, 0);
 
     std::list<auto_aim::Armor> main_armors;
