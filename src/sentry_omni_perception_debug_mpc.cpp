@@ -143,7 +143,8 @@ double usb_target_yaw_trim(TargetSource source)
 
 bool should_track_armor(auto_aim::ArmorName name, io::GimbalMode mode)
 {
-  if (mode == io::GimbalMode::AUTO_AIM) return name != auto_aim::ArmorName::outpost;
+  if (mode == io::GimbalMode::AUTO_AIM)
+    return name != auto_aim::ArmorName::outpost && name != auto_aim::ArmorName::two;
   if (mode == io::GimbalMode::OUTPOST) return name == auto_aim::ArmorName::outpost;
   return false;
 }
@@ -527,7 +528,7 @@ int main(int argc, char * argv[])
   if (use_usb) {
     usb_thread = std::thread([&]() {
       while (!quit) {
-        const auto mode =  io::GimbalMode::OUTPOST;
+        const auto mode = gimbal.mode();
         cv::Mat usb_left_img;
         cv::Mat usb_right_img;
         std::chrono::steady_clock::time_point usb_left_t;
@@ -604,7 +605,6 @@ int main(int argc, char * argv[])
     auto q = gimbal.q(t - GIMBAL_DELAY);
     auto gs = gimbal.state();
     auto mode = gimbal.mode();
-    mode =  io::GimbalMode::OUTPOST;
     auto q_ypr = tools::eulers(q, 2, 1, 0);
 
     std::list<auto_aim::Armor> main_armors;
