@@ -51,6 +51,7 @@ target_link_libraries(dashboard_config
 ####################src###################
 add_executable(standard src/standard.cpp)
 add_executable(mt_standard src/mt_standard.cpp)
+add_executable(standard_mpc_fyt src/standard_mpc_fyt.cpp)
 add_executable(auto_aim_debug_mpc
     src/auto_aim_debug_mpc.cpp
     src/auto_aim_debug_dashboard.cpp
@@ -60,19 +61,23 @@ add_executable(auto_aim_debug_mpc_ekfpnp
     src/auto_aim_debug_dashboard.cpp
 )
 add_executable(auto_aim_delay_tuner src/auto_aim_delay_tuner.cpp)
+add_executable(curve_generator src/curve_generator.cpp)
 add_executable(auto_aim_delay_calibration src/auto_aim_delay_calibration.cpp)
 add_executable(omni_perception_delay_tuner src/omni_perception_delay_tuner.cpp)
 add_executable(mt_auto_aim_debug src/mt_auto_aim_debug.cpp)
 add_executable(auto_buff_debug src/auto_buff_debug.cpp)
 add_executable(auto_buff_debug_mpc src/auto_buff_debug_mpc.cpp)
 add_executable(auto_buff_fyt_debug_mpc src/auto_buff_fyt_debug_mpc.cpp)
+add_executable(auto_buff_debug_mpc_fyt src/auto_buff_debug_mpc_fyt.cpp)
 add_executable(uav src/uav.cpp)
 add_executable(uav_debug src/uav_debug.cpp)
 
 target_link_libraries(standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(mt_standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
+target_link_libraries(standard_mpc_fyt ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff_fyt auto_buff tools io)
 target_link_libraries(auto_aim_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io dashboard_config)
 target_link_libraries(auto_aim_debug_mpc_ekfpnp ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_aim_ekfpnp auto_buff tools io dashboard_config)
+target_link_libraries(curve_generator ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 if(TARGET mqtt_bridge)
     target_link_libraries(auto_aim_debug_mpc mqtt_bridge dashboard_params)
     target_compile_definitions(auto_aim_debug_mpc PRIVATE SP_VISION_ENABLE_DASHBOARD_MQTT)
@@ -86,6 +91,7 @@ target_link_libraries(mt_auto_aim_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_ai
 target_link_libraries(auto_buff_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
 target_link_libraries(auto_buff_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
 target_link_libraries(auto_buff_fyt_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff_fyt auto_buff tools io ${CERES_LIBRARIES})
+target_link_libraries(auto_buff_debug_mpc_fyt ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff_fyt auto_buff tools io ${CERES_LIBRARIES})
 target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 

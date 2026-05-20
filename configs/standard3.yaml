@@ -151,6 +151,14 @@ max_pitch_acc: 100
 Q_pitch: [9e6, 0]
 R_pitch: [1]
 
+#####-----curve_generator参数-----#####
+curve_generator:
+  amplitude_deg: 10.0      # 单周期内 target_yaw 从 -amplitude_deg 扫到 +amplitude_deg
+  frequency_hz: 0.2        # target_yaw 周期频率
+  pitch_frequency_hz: 0.1  # target_pitch 阶跃切换频率
+  pitch_low_deg: -2.0      # target_pitch 阶跃低电平
+  pitch_high_deg: 2.0      # target_pitch 阶跃高电平
+
 #####-----plotter-----#####
 plotter:
   host: "127.0.0.1" # PlotJuggler UDP host, change to Windows LAN IP for cross-device debug
@@ -166,6 +174,9 @@ buff_fyt_detector:
   confidence_threshold: 0.7
   top_k: 128
   nms_threshold: 0.3
+  max_candidates: 2
+  min_radius_ratio: 0.8
+  lock_angle_thresh_rad: 0.5236
   detect_r_tag: true
   min_lightness: 90
   r_tag_roi_half_size: 120

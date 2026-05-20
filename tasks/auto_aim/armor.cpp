@@ -6,6 +6,14 @@
 
 namespace auto_aim
 {
+namespace
+{
+ArmorPriority default_priority_for_name(ArmorName name)
+{
+  return name == ArmorName::two ? ArmorPriority::second : ArmorPriority::first;
+}
+}  // namespace
+
 Lightbar::Lightbar(const cv::RotatedRect & rotated_rect, std::size_t id)
 : id(id), rotated_rect(rotated_rect)
 {
@@ -94,6 +102,7 @@ Armor::Armor(
     this->name = not_armor;  // Default
     this->type = small;      // Default
   }
+  priority = default_priority_for_name(this->name);
 }
 
 //神经网络ROI构造函数
@@ -142,6 +151,7 @@ Armor::Armor(
     this->name = not_armor;  // Default
     this->type = small;      // Default
   }
+  priority = default_priority_for_name(this->name);
 }
 
 // YOLOV5构造函数
@@ -177,6 +187,7 @@ Armor::Armor(
          : num_id > 5 ? ArmorName(num_id)
                       : ArmorName(num_id - 1);  //TODO 考虑Bb
   type = num_id == 1 ? ArmorType::big : ArmorType::small;
+  priority = default_priority_for_name(name);
 }
 
 // YOLOV5+ROI构造函数
@@ -216,6 +227,7 @@ Armor::Armor(
   color = color_id == 0 ? Color::blue : color_id == 1 ? Color::red : Color::extinguish;
   name = num_id == 0 ? ArmorName::sentry : num_id > 5 ? ArmorName(num_id) : ArmorName(num_id - 1);
   type = num_id == 1 ? ArmorType::big : ArmorType::small;
+  priority = default_priority_for_name(name);
 }
 
 }  // namespace auto_aim

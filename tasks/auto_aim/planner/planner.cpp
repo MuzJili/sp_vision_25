@@ -50,7 +50,6 @@ Eigen::Vector4d select_auto_aim_xyza(
 
   return selected_xyza;
 }
-
 }  // namespace
 
 Planner::Planner(const std::string & config_path)
@@ -104,49 +103,16 @@ bool Planner::apply_hot_param(const std::string & key, double value)
   return true;
 }
 
-Plan Planner::plan(Target target, double bullet_speed)
+Plan Planner::plan_trajectory(const Trajectory & traj, double yaw0)
 {
-  // 0. Check bullet speed
-  if (bullet_speed < 10 || bullet_speed > 25) {
-    bullet_speed = 22.5;
-  }
-
-  // 1. Predict fly_time
-  Eigen::Vector3d xyz;
-  auto min_dist = 1e10;
-  for (auto & xyza : target.armor_xyza_list()) {
-    auto dist = xyza.head<2>().norm();
-    if (dist < min_dist) {
-      min_dist = dist;
-      xyz = xyza.head<3>();
-    }
-  }
-  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z());
-  target.predict(bullet_traj.fly_time);
-
-  // 2. Get trajectory
-  double yaw0;
-  Trajectory traj;
-  try {
-    yaw0 = aim(target, bullet_speed, true)(0);
-    traj = get_trajectory(target, yaw0, bullet_speed);
-  } catch (const std::exception & e) {
-    tools::logger()->warn("Unsolvable target {:.2f}", bullet_speed);
-    return {false};
-  }
-
-  // 3. Solve yaw
   Eigen::VectorXd x0(2);
   x0 << traj(0, 0), traj(1, 0);
   tiny_set_x0(yaw_solver_, x0);
-
   yaw_solver_->work->Xref = traj.block(0, 0, 2, HORIZON);
   tiny_solve(yaw_solver_);
 
-  // 4. Solve pitch
   x0 << traj(2, 0), traj(3, 0);
   tiny_set_x0(pitch_solver_, x0);
-
   pitch_solver_->work->Xref = traj.block(2, 0, 2, HORIZON);
   tiny_solve(pitch_solver_);
 
@@ -176,6 +142,41 @@ Plan Planner::plan(Target target, double bullet_speed)
       traj(0, HALF_HORIZON + shoot_offset_) - yaw_solver_->work->x(0, HALF_HORIZON + shoot_offset_),
       traj(2, HALF_HORIZON + shoot_offset_) -
         pitch_solver_->work->x(0, HALF_HORIZON + shoot_offset_)) < fire_thresh;
+  return plan;
+}
+
+Plan Planner::plan(Target target, double bullet_speed)
+{
+  // 0. Check bullet speed
+  if (bullet_speed < 10 || bullet_speed > 25) {
+    bullet_speed = 22.5;
+  }
+
+  // 1. Predict fly_time
+  Eigen::Vector3d xyz;
+  auto min_dist = 1e10;
+  for (auto & xyza : target.armor_xyza_list()) {
+    auto dist = xyza.head<2>().norm();
+    if (dist < min_dist) {
+      min_dist = dist;
+      xyz = xyza.head<3>();
+    }
+  }
+  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z());
+  target.predict(bullet_traj.fly_time);
+
+  // 2. Get trajectory
+  double yaw0;
+  Trajectory traj;
+  try {
+    yaw0 = aim(target, bullet_speed)(0);
+    traj = get_trajectory(target, yaw0, bullet_speed);
+  } catch (const std::exception & e) {
+    tools::logger()->warn("Unsolvable target {:.2f}", bullet_speed);
+    return {false};
+  }
+
+  auto plan = plan_trajectory(traj, yaw0);
   plan.fire = plan.fire && target.allow_fire() && target.stable_for_fire();
   return plan;
 }
@@ -203,7 +204,6 @@ Plan Planner::plan(std::optional<Target> target, double bullet_speed)
 
   return plan(*target, bullet_speed);
 }
-
 void Planner::setup_yaw_solver(const std::string & config_path)
 {
   auto yaml = tools::load(config_path);
