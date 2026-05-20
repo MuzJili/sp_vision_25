@@ -41,12 +41,12 @@ constexpr double USB_RIGHT_YAW_OFFSET = -2.7;
 constexpr double USB_LEFT_TARGET_YAW_TRIM = -0.44;
 constexpr double USB_RIGHT_TARGET_YAW_TRIM = 0.2;
 constexpr double USB_TARGET_PITCH_TRIM = -5.0 / 57.3;
-constexpr char USB_LEFT_DEVICE[] = "video2";
-constexpr char USB_RIGHT_DEVICE[] = "video0";
+constexpr char USB_LEFT_DEVICE[] = "video0";
+constexpr char USB_RIGHT_DEVICE[] = "video2";
 constexpr double USB_SETTLE_YAW_THRESH = CV_PI / 180.0;
 constexpr double USB_SETTLE_PITCH_THRESH = CV_PI / 180.0;
-constexpr double FIRE_ALIGNMENT_YAW_THRESH = 3.0 * CV_PI / 180.0;
-constexpr double FIRE_ALIGNMENT_PITCH_THRESH = 3.0 * CV_PI / 180.0;
+constexpr double FIRE_ALIGNMENT_YAW_THRESH = 50.0 * CV_PI / 180.0;
+constexpr double FIRE_ALIGNMENT_PITCH_THRESH = 50.0 * CV_PI / 180.0;
 constexpr auto USB_SETTLE_TIMEOUT = std::chrono::milliseconds(1500);
 
 enum class TargetSource
@@ -125,7 +125,8 @@ double usb_target_yaw_trim(TargetSource source)
 
 bool should_track_armor(auto_aim::ArmorName name, io::GimbalMode mode)
 {
-  if (mode == io::GimbalMode::AUTO_AIM) return name != auto_aim::ArmorName::outpost;
+  if (mode == io::GimbalMode::AUTO_AIM)
+    return name != auto_aim::ArmorName::outpost && name != auto_aim::ArmorName::two;
   if (mode == io::GimbalMode::OUTPOST) return name == auto_aim::ArmorName::outpost;
   return false;
 }
