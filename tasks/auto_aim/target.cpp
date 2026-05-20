@@ -276,6 +276,15 @@ bool Target::allow_fire() const
   return is_static_outpost || use_outpost_staggered_height_model();
 }
 
+bool Target::stable_for_fire() const
+{
+  if (diverged()) return false;
+
+  if (name == ArmorName::outpost) return update_count_ >= 6;
+
+  return update_count_ >= 3;
+}
+
 bool Target::is_outpost_target() const
 {
   return name == ArmorName::outpost && armor_num_ == OUTPOST_ARMOR_COUNT;

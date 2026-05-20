@@ -42,6 +42,7 @@ public:
 
   bool convergened();
   bool allow_fire() const;
+  bool stable_for_fire() const;
 
   bool isinit = false;
 
