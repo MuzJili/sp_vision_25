@@ -45,6 +45,8 @@ constexpr char USB_LEFT_DEVICE[] = "video2";
 constexpr char USB_RIGHT_DEVICE[] = "video0";
 constexpr double USB_SETTLE_YAW_THRESH = CV_PI / 180.0;
 constexpr double USB_SETTLE_PITCH_THRESH = CV_PI / 180.0;
+constexpr double FIRE_ALIGNMENT_YAW_THRESH = 50.0 * CV_PI / 180.0;
+constexpr double FIRE_ALIGNMENT_PITCH_THRESH = 50.0 * CV_PI / 180.0;
 constexpr auto USB_SETTLE_TIMEOUT = std::chrono::milliseconds(1500);
 
 enum class TargetSource
@@ -217,6 +219,16 @@ TargetCommand make_usb_fixed_command(const UsbCandidate & candidate, const io::G
     candidate.armor.ypd_in_world[0] + gs.yaw_diff + usb_yaw_offset(candidate.source) +
     usb_target_yaw_trim(candidate.source));
   command.target_pitch = candidate.armor.ypd_in_world[1] + USB_TARGET_PITCH_TRIM;
+  return command;
+}
+
+TargetCommand make_main_fixed_command(const auto_aim::Armor & armor)
+{
+  TargetCommand command;
+  command.kind = CommandKind::fixed_aim;
+  command.source = TargetSource::main;
+  command.target_yaw = armor.ypd_in_world[0];
+  command.target_pitch = armor.ypd_in_world[1];
   return command;
 }
 
@@ -413,7 +425,10 @@ int main(int argc, char * argv[])
         stopped_settle_sequence = std::nullopt;
       }
 
-      const bool fire = target_command.source == TargetSource::main && plan.fire;
+      const bool fire_aligned =
+        std::abs(tools::limit_rad(gs.yaw - plan.target_yaw)) < FIRE_ALIGNMENT_YAW_THRESH &&
+        std::abs(gs.pitch - plan.target_pitch) < FIRE_ALIGNMENT_PITCH_THRESH;
+      const bool fire = target_command.source == TargetSource::main && plan.fire && fire_aligned;
       bool idle_stop_sent = false;
       if (target_command.kind == CommandKind::none) {
         if (stopped_idle_sequence != target_command.sequence) {
@@ -617,6 +632,9 @@ int main(int argc, char * argv[])
       if (!main_targets.empty()) {
         target_command.target = main_targets.front();
         target_command.kind = CommandKind::target;
+      } else if (!main_armors.empty()) {
+        target_command = make_main_fixed_command(main_armors.front());
+        target_command.omni_state = omni_state;
       }
       last_usb_command = std::nullopt;
       lost_command_sequence = std::nullopt;
