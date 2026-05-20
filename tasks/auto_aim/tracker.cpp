@@ -266,7 +266,7 @@ bool Tracker::bad_converge() const
   const double failure_rate = static_cast<double>(recent_failures) / failures.size();
   const double threshold =
     target_.name == ArmorName::outpost ? outpost_bad_converge_threshold_ : 0.4;
-  std::cout<<failure_rate<<std::endl;
+  // std::cout<<failure_rate<<std::endl;
   if (failure_rate < threshold) return false;
 
   tools::logger()->warn(

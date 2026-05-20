@@ -65,7 +65,7 @@ max_rectangular_error: 25 # degree
 min_detect_count: 5
 max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
-outpost_bad_converge_threshold: 0.35
+outpost_bad_converge_threshold: 0.46
 
 #####-----aimer参数-----#####
 yaw_offset: 1.2 # degree -2.5
@@ -85,7 +85,7 @@ judge_distance: 2 #距离判断阈值
 auto_fire: true # 是否由自瞄控制射击
 
 camera_name: "hikrobot"
-exposure_ms: 2.5
+exposure_ms: 2.9
 gain: 16.9
 vid_pid: "2bdf:0001"
 
